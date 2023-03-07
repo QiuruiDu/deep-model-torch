@@ -5,13 +5,51 @@ from torch import nn
 from torch import optim
 from torch.utils.data import DataLoader
 from model.dcn import DCN
+from model.wd import WideAndDeep
 from sklearn.model_selection import train_test_split
 from torch.utils.data import TensorDataset
 from sklearn.metrics import classification_report
+import argparse
 
 data_path = './data/Telco-Customer-Churn-Clear.csv'
 
-def get_tensorData(test_size = 0.15):
+
+def get_parser():
+    parser = argparse.ArgumentParser(description="main function")
+    parser.add_argument('--model_type', default='dcn')
+    parser.add_argument('--batch_size', default=50)
+    parser.add_argument('--embedding_dim', default=4)
+    parser.add_argument('--cross_layer_num', default=2)
+    parser.add_argument('--early_stopping', default=9)
+    args = parser.parse_args()
+    return args
+
+
+def main():
+    args = get_parser()
+    model_type = args.model_type
+    batch_size = int(args.batch_size)
+    embedding_dim = int(args.embedding_dim)
+    cross_layer_num = int(args.cross_layer_num)
+    early_stopping = int(args.early_stopping)
+    train_dict, test_dict = get_tensor_data()
+    train_dataset = TensorDataset(train_dict['x_sparse'], train_dict['x_dense'], train_dict['y'])
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    sparse_dim_dict = train_dict['sparse_dict']
+    dense_dim = len(train_dict['dense_col'])
+
+    if model_type == 'dcn':
+        model = DCN(emb_dim=embedding_dim, cross_layer_num=cross_layer_num, sparse_dim_dict=sparse_dim_dict, dense_dim=dense_dim)
+    elif model_type == 'wd':
+        model = WideAndDeep(sparse_dim_dict=sparse_dim_dict, emb_dim=embedding_dim, dense_dim=dense_dim)
+    else:
+        print("No this model!")
+        return
+    model = train(train_loader, early_stopping, model)
+    predict(model, test_dict['x_sparse'], test_dict['x_dense'], test_dict['y'])
+
+
+def get_tensor_data(test_size = 0.15):
     """
     :param test_size: the split size of test data
     :return:train data dict and test data dict
@@ -50,14 +88,13 @@ def get_tensorData(test_size = 0.15):
     return train_dict, test_dict
 
 
-def train(train_loader: DataLoader, sparse_dim_dict :dict, dense_dim :int):
+def train(train_loader: DataLoader, early_stopping: int, model):
     """
     :param train_loader: train data DataLoader
-    :param sparse_dim_dict: data dim dict of sparse
-    :param dense_dim: dense dim
+    :param early_stopping: early stopping number
+    :param model: model
     :return:
     """
-    model = DCN(emb_dim=4, cross_layer_num=2,hidden_dims=[16,8],dropouts=[0.5,0.5], sparse_dim_dict=sparse_dim_dict, dense_dim=dense_dim)
     if torch.cuda.is_available():
         print("cuda is OK")
         model = model.to('cuda')
@@ -92,7 +129,7 @@ def train(train_loader: DataLoader, sparse_dim_dict :dict, dense_dim :int):
                 es += 1
                 print("Counter {} of 6".format(es))
 
-                if es > 4:
+                if es > early_stopping:
                     print("Early stopping with best_loss: ", best_loss, "and loss for this epoch: ", iter_loss, "...")
                     break
 
@@ -118,16 +155,6 @@ def predict(model, test_sparse, test_dense, y_test = None):
         print(classification_report(y_test,prediction))
     return prediction
 
-
-def main():
-    train_dict, test_dict = get_tensorData()
-    batch_size = 50
-    train_dataset = TensorDataset(train_dict['x_sparse'], train_dict['x_dense'], train_dict['y'])
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    sparse_dim_dict = train_dict['sparse_dict']
-    dense_dim = len(train_dict['dense_col'])
-    model = train(train_loader, sparse_dim_dict, dense_dim)
-    predict(model, test_dict['x_sparse'], test_dict['x_dense'], test_dict['y'])
 
 
 if __name__ == '__main__':
